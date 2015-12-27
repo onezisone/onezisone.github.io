@@ -1,0 +1,128 @@
+---
+title: "Practical Machine Learning - Activity quality from activity monitors"
+author: "Wan Nazirul"
+date: "December 27, 2015"
+output: html_document
+---
+
+##Executive Summary 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)."
+
+The objective of this report is to predict the manner in which they did the exercise. This report will do the following:
+
+* create a report describing how the model is built
+* how cross validation is use
+* what is the expected out of sample error and why we made the choices we did
+* use prediction model to predict 20 different test cases 
+
+##Data Analysis
+Load the required libraries and data set.
+```{r }
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+
+trainingRaw<-read.csv(file="pml-training.csv")
+testingRaw<-read.csv(file="pml-testing.csv")
+```
+
+Check the dimension of the raw data of training and testing.
+```{r}
+dim(trainingRaw)
+dim(testingRaw)
+```
+###Cleaning the data
+In this step, we remove any columns that containts NA value in both data set:
+```{r}
+trainingRaw <- trainingRaw[, colSums(is.na(trainingRaw)) == 0] 
+testingRaw <- testingRaw[, colSums(is.na(testingRaw)) == 0] 
+```
+Next, we also remove user name, timestamps and windows as this insignificantly affect our predictor. We only take numeric columns into account.
+```{r}
+classe <- trainingRaw$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainingRaw))
+trainingRaw <- trainingRaw[, !trainRemove]
+trainCleaned <- trainingRaw[, sapply(trainingRaw, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testingRaw))
+testingRaw <- testingRaw[, !testRemove]
+testCleaned <- testingRaw[, sapply(testingRaw, is.numeric)]
+
+```
+
+##Data Modeling
+###Splitting Training Set
+We split the cleaned training set into training data set (60%) as opposed to validation data set (40%). We will explore two types of algorithm namely Decision Treeand Random Forest to see which one best suite this prediction.
+```{r}
+set.seed(1609) 
+inTrain <- createDataPartition(y=trainCleaned$classe, p=0.60, list=FALSE)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+###Machine Learning Algorithms: Decision Tree
+
+For the first model, We fit a predictive model for activity recognition using Decision Tree method:
+```{r}
+ctrl <- trainControl(method = "cv", number=5)
+rpartModel <- train(classe ~ ., 
+                    data=trainData, 
+                    method="rpart", 
+                    trControl=ctrl)
+
+modelPredictions <- predict(rpartModel, testData)
+cmatrix <- confusionMatrix(modelPredictions, testData$classe)
+cmatrix
+```
+
+```{r}
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, modelPredictions)$overall[1])
+oose
+
+```
+
+It turns out that Decision Tree method give us the accuracy is 49.2%, thus the predicted accuracy for the out-of-sample error is 50.8% which is quite high.
+
+###Machine Learning Algorithms: Random Forest
+
+We fit a predictive model for activity recognition using **Random Forest** algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general. We now build 5 random forests with 250 trees each. We make use of parallel processing to build this model.
+```{r}
+ctrl <- trainControl(method = "oob", allowParallel = TRUE)
+rfModel <- train(classe ~ ., data=trainData, method="rf", trControl=ctrl)
+
+modelPredictions <- predict(rfModel, testData)
+cmatrix <- confusionMatrix(modelPredictions, testData$classe)
+cmatrix
+
+```
+```{r}
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, modelPredictions)$overall[1])
+oose
+
+```
+
+The accuracy using Random Forest is 99.9%, thus the predicted accuracy for the out-of-sample error is 0.8%. Therefore, we choose **Random Forests** since it produce better results. 
+
+##Predicting for Test Data Set
+
+Now, we apply the model to the original testing data set downloaded from the data source. We also produce the files needed for  submission assingment.
+```{r}
+Results <- predict(rfModel,testCleaned)
+Results
+```
+```{r}
+Results <- predict(rfModel,testCleaned)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:20){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(Results)
+
+```
